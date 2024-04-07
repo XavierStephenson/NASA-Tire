@@ -1,0 +1,104 @@
+
+def GetFolderOld():
+
+    #Initilizing
+    cv2.namedWindow("Select File", cv2.WINDOW_AUTOSIZE)
+    img = cv2.imread('Images/blank.png')
+    width, height, c = img.shape
+    h = 20
+    fnumb = [0]
+    folder_name = [""]
+    state = ['folder']
+    allfiles = [0]
+    path = ['']
+    scroll = [0]
+
+    #order the folders by date
+
+    allfolders = [f for f in os.listdir('Outputs') if not os.path.isfile(os.path.join('Outputs', f))]
+    folder_dict = {}
+    for i in allfolders:
+        folder_dict[i] = os.path.getmtime(os.path.join('Outputs', i))
+    res = {key: val for key, val in sorted(folder_dict.items(), reverse=True, key = lambda ele: ele[1])}
+    allfolders = list(res.keys())
+   
+
+    #on click
+    def on_click(event, x, y, p1, p2):
+        if event == 10 and state[0] == 'folder':
+            if y<height/2:
+                scroll[0] += h/5
+            else:
+                scroll[0] += -h/5
+            scroll[0] = int(scroll[0])
+
+            if scroll[0] > 0: scroll[0] = 0
+        #get the row that mouse is hovering on
+        fnumb[0] = (y-scroll[0])//h
+
+        if fnumb[0] < 0:
+            fnumb[0] = 0
+        #clear img val
+        img = cv2.imread('Images/blank.png')
+        #make rectangle on row
+        cv2.rectangle(img, (0, fnumb[0]*h + scroll[0]), (width, fnumb[0]*h + h + scroll[0]), (100,100,100), -1)
+
+        #if folder state show all folders
+        if state[0] == 'folder':
+            if fnumb[0] > len(allfolders)-1: img = cv2.imread('Images/blank.png')
+            for i in range(len(allfolders)):
+                cv2.putText(img, allfolders[i], (10, h*i + h + scroll[0]), cv2.FONT_HERSHEY_SIMPLEX , .5, (0, 0, 0), 1, cv2.LINE_AA) 
+        
+        #if file state show all files in folder
+        if state[0] == 'file':
+            allfiles[0] = os.listdir('Outputs/'+folder_name[0])
+            if fnumb[0] > len(allfiles[0])-1: img = cv2.imread('Images/blank.png')
+            for i in range(len(allfiles[0])):
+                cv2.putText(img, allfiles[0][i], (10, h*i + h + scroll[0]), cv2.FONT_HERSHEY_SIMPLEX , .5, (0, 0, 0), 1, cv2.LINE_AA) 
+
+        #if left click register slections
+        if event == 4:
+            Select()
+        
+        cv2.imshow('Select File', img)
+
+    def Select():
+        #if folder state go into that folder
+        if state[0] == "folder" and fnumb[0] < len(allfolders):
+            state[0] = 'file'
+            folder_name[0] = allfolders[fnumb[0]]
+            scroll[0] = 0
+            on_click(0,0,0,0,0)
+            return
+
+        #if file state slect that file
+        if state[0] == "file" and fnumb[0] < len(allfiles[0]):
+            file_name = allfiles[0][fnumb[0]]
+            path[0] = 'Outputs/'+folder_name[0]+'/'+file_name
+            cv2.setMouseCallback('Select File', lambda *args : None)
+            return
+
+    #initiate mouse manuevring
+    cv2.setMouseCallback('Select File', on_click)  
+    on_click(0,0,0,0,0)
+
+    #loop to stay in function till folder selected
+    while True:
+        key = cv2.waitKey(1)
+        #if eneter is press register selection
+        if key == 13 : Select()
+
+        #if file was selected return file path
+        if path[0] != '': 
+            cv2.destroyWindow('Select File')
+            return path[0]
+        
+        #if back space selected go into folder mode
+        if key == 8 and state[0] == "folder":
+            return False
+        
+        #if back space selected go into folder mode
+        if key == 8 and state[0] == "file":
+            state[0] = 'folder'
+            on_click(0,0,0,0,0)
+        
