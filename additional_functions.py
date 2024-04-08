@@ -19,64 +19,26 @@ def Tire(pix):
     if pix[2] > maxR: return True
     return False
 
-def DoMath(vertices, color, colormap,f):
-    w = color.shape[1]
-    step = 6
-    tire_gaps = FindGaps(vertices, color, step)
-    hsv_image = cv2.cvtColor(color, cv2.COLOR_BGR2HSV).copy()
 
-    footprint = color.copy()
-    tirecolor = color.copy()
-    tiredepth = colormap.copy()
-    floorcolor = color.copy()
-    floordepth = colormap.copy()
-    contact = color.copy()
 
-    if f%(mp.cpu_count()) == 0: print('Group',f//mp.cpu_count(),":")
-    for i in range(len(vertices)):
+def Arrays(verts, color):
+    h, w = color.shape[:2]
+
+    tire_arr = np.zeros((h, w, 3), dtype=bool)
+    floor_arr = tire_arr.copy()
+    for i in range(len(verts)):
         x = i%w
         y = i//w
-        footprint[y][x] = [255,255,255]
-        if f%(mp.cpu_count()) == 0 and x==w-1 and y%60 == 0: print(f//mp.cpu_count(),int((i+(w*60))/len(vertices)*1000)/10,'%')
-        
-        if vertices[i][2] > 2:
-            vertices[i] = False
-            floorcolor[y][x] = [70,70,70]
-            tirecolor[y][x] = [70,70,70]
-            contact[y][x] = [70,70,70]
+        if verts[i][2] < 2 and verts[i][2] != 0:
+            if color[y][x][2] > 150:
+                tire_arr[y][x] = [True,True,True]
+            else:
+                floor_arr[y][x] = [True,True,True]
+    return [tire_arr, floor_arr]
 
-        elif vertices[i][2] == 0:
-            floorcolor[y][x] = [0,0,0]
-            tirecolor[y][x] = [0,0,0]
-            contact[y][x] = [0,0,0]
-
-        elif sum(color[y][x]) < 330:
-            tirecolor[y][x] = [0,0,0]
-            tiredepth[y][x] = [0,0,0]
-
-        else:
-            floorcolor[y][x] = [0,0,0]
-            floordepth[y][x] = [0,0,0]
-
-            #index = FindClosestGap(x,y,step,tire_gaps)
-            index = False
-            if index:
-                tire_i, tire_j = index
-                dist = abs(tire_gaps[tire_j][tire_i] - vertices[i][2])
-                footprint[y][x] = [255*dist,255*dist,255*dist]
-                
-                if dist < .02:
-                    contact[y][x] = [0,255,0]
-
-
-            
-        
-    return [[contact, colormap],[tirecolor,tiredepth],[floorcolor,floordepth], footprint]
-
-def FindGaps(vertices, color,step):
-    h, w = color.shape[:2]
+def FindGaps(verts, floor_arr, shape, step, color):
+    h, w = shape
     tire_gaps = []
-
     for j in range(0,h,step):
         tire_gaps.append([])
         for i in range(0,w,step):
@@ -86,34 +48,64 @@ def FindGaps(vertices, color,step):
             for jj in range(j,j+step,1):
                 for ii in range(i,i+step,1):
                     try:
-                        if Tire(color[jj][ii]) or vertices[jj*w+ii][2] == 0 or vertices[jj*w+ii][2] > 2:
+                        if not floor_arr[jj][ii][0]:
                             tire_gaps[-1][-1] = False
+                            break
                         else:
-                            this_square_sum_z += vertices[jj*w+ii][2]
+                            this_square_sum_z += verts[jj*w+ii][2]
                     except:
                         pass
             if tire_gaps[-1][-1]:
-                tire_gaps[-1][-1] = this_square_sum_z/(step*step)
-
+                tire_gaps[-1][-1] = this_square_sum_z/((step)**2)
+              
     return tire_gaps
 
-def FindClosestGap(x,y, step, tire_gaps):
-    tire_gaps_dict = {}
+def DoMath(verts, color, colormap,f):
+    step = 5
+    h, w = color.shape[:2]
+    truth_tire, truth_floor = Arrays(verts, color)
+    tire_gaps = FindGaps(verts, truth_floor, color.shape[:2], step, color.copy())
+
+    gap_centers = []
     for j in range(len(tire_gaps)):
         for i in range(len(tire_gaps[j])):
             if tire_gaps[j][i]:
-                dist_from_point = math.sqrt(((i+.5)*step-x)**2 + ((j+.5)*step-y)**2)
-                tire_gaps_dict[dist_from_point] = [i,j]
-    sorted_dict = dict(sorted(tire_gaps_dict.items()))
-    closest_dist = list(sorted_dict.items())[0][0]
-    if closest_dist > 30:
-        return False
-    """i,j = list(sorted_dict.items())[0][1]
-    dist = list(sorted_dict.items())[0][0]
-    return i,j,dist"""
-    return list(sorted_dict.items())[0][1]
-   
+                gap_centers.append([(i+.5)*step,(j+.5)*step])
+    
 
+    tire = truth_tire*color
+    tire_map = truth_tire*colormap
+
+    floor = truth_floor*color
+    floor_map = truth_floor*colormap
+
+    contact = color.copy()
+
+    diff_arr = np.ones((h, w, 3), dtype=float)
+    
+    for index in range(len(verts)):
+       
+        x = index%w
+        y = index//w
+        if f%(mp.cpu_count()) == 0 and x==w-1 and y%60 == 0: print(f//mp.cpu_count(),int((index+(w*60))/len(verts)*1000)/10,'%')
+        if truth_tire[y][x][0]:
+            gap_centers = np.array(gap_centers)
+            point = np.array((x,y))
+            distances = np.linalg.norm(gap_centers-point, axis=1)
+            min_index = np.argmin(distances)
+            i,j = gap_centers[min_index]/step
+            i = int(i)
+            j = int(j)
+            dist = distances[min_index]
+
+            if dist < 30 and tire_gaps[j][i]:
+                diff = abs(verts[index][2]-tire_gaps[j][i])
+                diff_arr[y][x] *= diff
+                if diff < .02:
+                    contact[y][x] = [0,255,0]
+    
+
+    return [[contact, colormap],[tire,tire_map],[floor,floor_map], diff_arr]  
 
 
 def Save(path, all_verts, all_texcoords, all_color_images, all_depth_colormaps):
@@ -138,7 +130,7 @@ def Save(path, all_verts, all_texcoords, all_color_images, all_depth_colormaps):
     tire_color, tire_map = [[],[]]
     floor_color, floor_map = [[],[]]
     all_footprints = []
-    all_verts = all_verts[:1]
+
     #Bundling input for multiproccessing
     inputs = []
     for f in range(len(all_verts)):
