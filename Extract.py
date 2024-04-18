@@ -4,17 +4,19 @@ import pyrealsense2 as rs
 import settings
 from d3_viewer_functions import *
 from additional_functions import *
+from menu_functions import *
 import os
 
 
 def init():
     settings.init()
         
-    all_verts = []
-    all_texcoords = []
-    all_color_images = []
-    all_depth_colormaps = []
-    new = AskNew()
+    all_verts, all_texcoords, all_color_images, all_depth_colormaps = [[],[],[],[]]
+
+    title = "What Type of Data to Anylalize"
+    options = ['New Data','Old Data']
+    new = menu_functions.ClickMenu(settings.window_name, title, options, True)
+
     if new == 0: 
         return
     else:
@@ -27,8 +29,9 @@ def init():
 
         return
     path = MakeFolder() #new
+    print(path)
     os.makedirs(path+'Temporary Files')
-    
+    os.makedirs(path+'obj')
 
     cv2.namedWindow(settings.state.WIN_NAME, cv2.WINDOW_AUTOSIZE)
     cv2.resizeWindow(settings.state.WIN_NAME, settings.w, settings.h)
@@ -92,6 +95,7 @@ def init():
             cv2.imshow("Color", color_image)
             print('showing',len(all_verts)+1)
 
+            #points.export_to_ply(path+'obj/'+str(len(all_verts))+'.ply', mapped_frame)
             cv2.imshow("Color", color_image)
 
         # Render
@@ -121,8 +125,8 @@ def init():
 
         #Make naming thing better
         if key == ord("e"):
-            points.export_to_ply('Outputs/out.ply', mapped_frame)
-
+            points.export_to_ply(path+'obj/'+str(len(all_verts))+'.ply', mapped_frame)
+            print(path+'obj/'+str(len(all_verts))+'.ply')
         if key in (27, ord("q")) or cv2.getWindowProperty(settings.state.WIN_NAME, cv2.WND_PROP_AUTOSIZE) < 0:
             break
     

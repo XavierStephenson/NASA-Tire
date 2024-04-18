@@ -8,14 +8,15 @@ import settings
 import Extract
 import View
 import LiveView
-
+import FindColor
+settings.init()
 if __name__ == '__main__':
     mp.freeze_support()
     while True:
-        i = ClickMenu('Main Menu', 'Main Menu', ["Extract Data", "View Stored Data", "Live Viewer", "Options"], True)
+        i = ClickMenu(settings.window_name, 'Main Menu', ["Extract Data", "View Stored Data", "Live Viewer", "Find Color", "Options"], True)
         match i:
             case False: break
             case 1: Extract.init()
             case 2: View.init()
             case 3: LiveView.init()
-            
+            case 4: FindColor.init()

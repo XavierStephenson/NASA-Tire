@@ -35,7 +35,7 @@ from additional_functions import FindGaps
 
 def init():
     settings.init()
-
+    cv2.destroyAllWindows()
     cv2.namedWindow(settings.state.WIN_NAME, cv2.WINDOW_AUTOSIZE)
     cv2.resizeWindow(settings.state.WIN_NAME, settings.w, settings.h)
     cv2.setMouseCallback(settings.state.WIN_NAME, mouse_cb)

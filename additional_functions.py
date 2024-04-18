@@ -5,6 +5,8 @@ import numpy as np
 import shutil
 import math
 import multiprocessing as mp
+import timeit
+from stl import mesh
 #from menu_functions import *
 import menu_functions
 
@@ -21,20 +23,61 @@ def Tire(pix):
 
 
 
-def Arrays(verts, color):
+def ArraysOld(verts, color):
     h, w = color.shape[:2]
 
     tire_arr = np.zeros((h, w, 3), dtype=bool)
     floor_arr = tire_arr.copy()
+    hsv_image = cv2.cvtColor(color, cv2.COLOR_BGR2HSV)
     for i in range(len(verts)):
         x = i%w
         y = i//w
         if verts[i][2] < 2 and verts[i][2] != 0:
-            if color[y][x][2] > 150:
+            if hsv_image[y][x][0] > 100:
                 tire_arr[y][x] = [True,True,True]
             else:
                 floor_arr[y][x] = [True,True,True]
     return [tire_arr, floor_arr]
+
+def Arrays(verts, color):
+    
+    h,w = color.shape[:2]
+    #color = cv2.cvtColor(color, cv2.COLOR_BGR2HSV)
+    color = color.reshape((len(verts),3))
+    truth_tire = np.ones_like(verts)
+    truth_floor = np.ones_like(verts)
+    #Falsing the 0's
+    truth = np.sign(np.sign(sum(np.transpose(verts != [0,0,0]))-1)+1).reshape(len(verts),1)
+    truth_tire  *= truth
+    truth_floor *= truth
+
+    #Falsing the z>2's
+    truth = np.sign(np.sign(sum(np.transpose(verts <= [-np.inf,-np.inf,2]))-1)+1).reshape(len(verts),1)
+    truth_tire *= truth
+    truth_floor *= truth
+
+    #Falsing not the not Tire color
+    truth1 = color > [0,0,0]
+    truth2 = color < [100,100,100]
+    truth = sum(np.transpose(truth1*truth2)) == 3
+    truth = np.array(truth, dtype=int).reshape(len(truth),1)
+    truth_tire *= truth
+
+    #inverting that for floor
+    truth_floor *= np.logical_not(truth)
+
+    #putting back to correct shape
+    truth_tire = np.array(truth_tire.reshape(h,w,3), dtype=bool)
+    truth_floor = np.array(truth_floor.reshape(h,w,3), dtype=bool)
+
+    return [truth_tire, truth_floor]
+
+
+#if every el in compare_arr is greater than its equivalent in an in_arr then the output is [0 0 0] in the in_arr spot
+#array with shape (huge, 3)
+def CompareArr(in_arr,compare_arr):
+    truth = np.sign(np.sign(sum(np.transpose(in_arr >= compare_arr))-1)+1).reshape((len(in_arr)),1)
+    return np.ones_like(in_arr,dtype=bool)*truth
 
 def FindGaps(verts, floor_arr, shape, step, color):
     h, w = shape
@@ -60,9 +103,10 @@ def FindGaps(verts, floor_arr, shape, step, color):
               
     return tire_gaps
 
-def DoMath(verts, color, colormap,f):
+def DoMath(verts, color, colormap, f):
     step = 5
     h, w = color.shape[:2]
+
     truth_tire, truth_floor = Arrays(verts, color)
     tire_gaps = FindGaps(verts, truth_floor, color.shape[:2], step, color.copy())
 
@@ -71,25 +115,31 @@ def DoMath(verts, color, colormap,f):
         for i in range(len(tire_gaps[j])):
             if tire_gaps[j][i]:
                 gap_centers.append([(i+.5)*step,(j+.5)*step])
-    
+    gap_centers = np.array(gap_centers)
+    if f%(settings.cores) == 0: print('start reshaping')
+    vert_shaped = verts.reshape(h,w,3)
 
-    tire = truth_tire*color
+    tire_color = truth_tire*color
     tire_map = truth_tire*colormap
+    tire_verts = (truth_tire*vert_shaped).reshape(len(verts),3)
 
-    floor = truth_floor*color
+    floor_color = truth_floor*color
     floor_map = truth_floor*colormap
+    floor_verts = (truth_floor*vert_shaped).reshape(len(verts),3)
 
-    contact = color.copy()
-
+    contact_color = color.copy()
+    if f%(settings.cores) == 0: print('done reshaping')
     diff_arr = np.ones((h, w, 3), dtype=float)
     
     for index in range(len(verts)):
        
         x = index%w
         y = index//w
-        if f%(mp.cpu_count()) == 0 and x==w-1 and y%60 == 0: print(f//mp.cpu_count(),int((index+(w*60))/len(verts)*1000)/10,'%')
+
+        if f%(settings.cores) == 0 and x==w-1 and y%10 == 0: 
+            text = str(f//settings.cores)+': '+str(int((index+(w*10))/len(verts)*1000)/10)+'%'
+            print(text)
         if truth_tire[y][x][0]:
-            gap_centers = np.array(gap_centers)
             point = np.array((x,y))
             distances = np.linalg.norm(gap_centers-point, axis=1)
             min_index = np.argmin(distances)
@@ -101,11 +151,11 @@ def DoMath(verts, color, colormap,f):
             if dist < 30 and tire_gaps[j][i]:
                 diff = abs(verts[index][2]-tire_gaps[j][i])
                 diff_arr[y][x] *= diff
-                if diff < .02:
-                    contact[y][x] = [0,255,0]
+                if diff < .01:
+                    contact_color[y][x] = [0,255,0]
     
 
-    return [[contact, colormap],[tire,tire_map],[floor,floor_map], diff_arr]  
+    return [[verts, contact_color, colormap],[tire_verts, tire_color,tire_map],[floor_verts, floor_color,floor_map], diff_arr]  
 
 
 def Save(path, all_verts, all_texcoords, all_color_images, all_depth_colormaps):
@@ -126,10 +176,8 @@ def Save(path, all_verts, all_texcoords, all_color_images, all_depth_colormaps):
     all_footprints = all_color_images.copy()
     np.savez(path+'Clean', all_verts=all_verts, all_texcoords=all_texcoords, all_color_images=all_color_images, all_depth_colormaps=all_depth_colormaps, all_footprints=all_footprints)
     """
-    contact_color, contact_map= [[],[]]
-    tire_color, tire_map = [[],[]]
-    floor_color, floor_map = [[],[]]
-    all_footprints = []
+    contact, tire, floor, all_footprints = [[],[],[],[]]
+
 
     #Bundling input for multiproccessing
     inputs = []
@@ -137,36 +185,45 @@ def Save(path, all_verts, all_texcoords, all_color_images, all_depth_colormaps):
         inputs.append([all_verts[f].copy(),all_color_images[f].copy(),all_depth_colormaps[f].copy(),f])
     
     #Uses all cores on the computer
-    print("Using All",mp.cpu_count(),"cores")
-    print(len(all_verts),'frames',len(all_verts)//mp.cpu_count()+1,'Groups')
-    pool = mp.Pool(mp.cpu_count())
+    text = "Using All "+str(settings.cores)+" cores"
+
+    print(text)
+    text = str(len(all_verts))+' frames '+str(len(all_verts)//settings.cores+1)+' Groups'
+    print(text)
+  
+
+    pool = mp.Pool(settings.cores)
     results = pool.starmap(DoMath, inputs)
     pool.close() 
     print("Finished!")
 
     #Unbundling result for use
-    for f in range(len(all_verts)):
-        contact,tire,floor, footprint = results[f]
+    for i in range(3):
+        contact.append([])
+        tire.append([])
+        floor.append([])
 
-        contact_color.append(contact[0]) 
-        contact_map.append(contact[1]) 
-        tire_color.append(tire[0]) 
-        tire_map.append(tire[1]) 
-        floor_color.append(floor[0]) 
-        floor_map.append(floor[1])
-        all_footprints.append(footprint) 
+    for f in range(len(all_verts)):
+        contact_f, tire_f, floor_f, footprint_f = results[f]
+        all_footprints.append(footprint_f)
+
+        for i in range(len(contact_f)):
+            contact[i].append(contact_f[i])
+            tire[i].append(tire_f[i])
+            floor[i].append(floor_f[i])
+            
     
 
     MakeFile('Contact')
-    all_color_images, all_depth_colormaps = contact_color, contact_map
+    all_verts, all_color_images, all_depth_colormaps = contact
     np.savez(path+'Contact', all_verts=all_verts, all_texcoords=all_texcoords, all_color_images=all_color_images, all_depth_colormaps=all_depth_colormaps, all_footprints=all_footprints )
     
     MakeFile('Tire')
-    all_color_images, all_depth_colormaps = tire_color, tire_map
+    all_verts, all_color_images, all_depth_colormaps = tire
     np.savez(path+'Tire', all_verts=all_verts, all_texcoords=all_texcoords, all_color_images=all_color_images, all_depth_colormaps=all_depth_colormaps, all_footprints=all_footprints )
     
     MakeFile('Floor')
-    all_color_images, all_depth_colormaps = floor_color, floor_map
+    all_verts, all_color_images, all_depth_colormaps = floor
     np.savez(path+'Floor', all_verts=all_verts, all_texcoords=all_texcoords, all_color_images=all_color_images, all_depth_colormaps=all_depth_colormaps, all_footprints=all_footprints )
     try:
         shutil.rmtree(path+'Temporary Files')
@@ -258,80 +315,36 @@ def GetMouseInfo(event, x, y, flag, param):
     cv2.putText(img, str(x)+','+str(y), (10, 175), cv2.FONT_HERSHEY_SIMPLEX , .5, (0, 0, 0), 1, cv2.LINE_AA) 
     cv2.imshow('Data', img) 
 
-def MakeFolder():
-    first = True
-    while True:
+def SeperatePixs(color_image):
+    color_image = color_image.reshape(color_image.size//3, 3)
+    truth1 = color_image > [0,0,0]
+    truth2 = color_image < [110,110,110]
+    truth = sum(np.transpose(truth1*truth2)) == 3
+    settings.tire_pos = truth
 
-        #if folder doesnt exist make it and return the path
-        window_name = 'Folder'
-        if first:
-            msg1 = "Please Type Destination Folder"
-            msg2 = "Hit Enter When Finished"
-        else:
-            msg1 = "That Folder Already Exist"
-            msg2 = "Press Any Key To Try Again"
-        folder_name = menu_functions.TypeMenu(window_name,msg1,msg2)
-        first = False
-        print(folder_name)
-        try:
-            os.makedirs('Outputs/'+folder_name)
-            path = 'Outputs/'+folder_name+'/'
-            cv2.destroyWindow(window_name)
-            return path
-        #if folder exists inform user and try again
-        except:
-            pass
-            
-def AskNew():
-    window_name = "What Type of Data to Anylalize"
-    options = ['New Data','Old Data']
-    return menu_functions.ClickMenu(window_name, window_name, options, True)
+    print(settings.tire_pos)
+    print(sum(settings.tire_pos), len(settings.tire_pos))
 
-def GetFile():
-    #get list of folders in outputs, put most recent at top
-    allfolders = [f for f in os.listdir('Outputs') if not os.path.isfile(os.path.join('Outputs', f))]
-    folder_dict = {}
-    for i in allfolders:
-        folder_dict[i] = os.path.getmtime(os.path.join('Outputs', i))
-    res = {key: val for key, val in sorted(folder_dict.items(), reverse=True, key = lambda ele: ele[1])}
-    allfolders = list(res.keys())
+def GetColorInfo(event, x, y, flag, color_image):
+    #key = cv2.waitKey(1)
+    
+    cv2.namedWindow("Data", cv2.WINDOW_AUTOSIZE)
+    img = cv2.imread('Images/blank.png')
+    hsv_image = cv2.cvtColor(color_image, cv2.COLOR_BGR2HSV)
 
-    while True:
-        #Get what folder user clicked on, if they backspaced at folder level return false
-        i = menu_functions.ClickMenu('Select Folder', 'Select Folder', allfolders, False)
-        if i == 0:
-            return False
-        else:
-            folder = allfolders[i-1]  
+    #display color info
+    color = np.array(color_image[y][x],dtype=int)
+    if settings.mode == 'Floor':
+        print(settings.mode,color)
+        settings.floor_colors.append(color)
+    if settings.mode == 'Tire':
+        print(settings.mode,color)
+        settings.tire_colors.append(color)
+    cv2.putText(img, settings.mode+str(color), (10, 75), cv2.FONT_HERSHEY_SIMPLEX , .5, (0, 0, 0), 1, cv2.LINE_AA) 
+    color_text = str(hsv_image[y][x])+str(color)
 
-        
-        #Get what file they clicked on, if back space cont in loop, else get file and return path
-        allfiles = os.listdir('Outputs/'+folder)
-        i = menu_functions.ClickMenu(folder, folder+': Pleae Select File', allfiles, False)
-        if i !=0 :
-            file = allfiles[i-1]
-            path = 'Outputs/'+folder+'/'+file
-            return path
-
-def GetFolder():
-    #get list of folders in outputs, put most recent at top
-    allfolders = [f for f in os.listdir('Outputs') if not os.path.isfile(os.path.join('Outputs', f))]
-    folder_dict = {}
-    for i in allfolders:
-        folder_dict[i] = os.path.getmtime(os.path.join('Outputs', i))
-    res = {key: val for key, val in sorted(folder_dict.items(), reverse=True, key = lambda ele: ele[1])}
-    allfolders = list(res.keys())
-
-
-    #Get what folder user clicked on, if they backspaced at folder level return false
-    i = menu_functions.ClickMenu('Select Folder', 'Select Folder', allfolders, False)
-    if i == 0:
-        return False
-    else:
-        folder = allfolders[i-1]  
-        path = 'Outputs/'+folder+'/'
-        return path
-                        
+    cv2.imshow('Data', img) 
+                      
 def OldSave(path):
     outfile = path+'Raw.npz'
     npzfile = np.load(outfile)
@@ -345,73 +358,137 @@ def OldSave(path):
     os.makedirs(path)
     Save(path, all_verts, all_texcoords, all_color_images, all_depth_colormaps)
 
-def NewFile(file_name, points, faces):
-    file_name += '.obj'
-    txt = '#Blank Comment\n\n'
-    for point in points:
-        txt += 'v'
-        for dim in point:
-            txt += ' '+str(dim)
-        txt += '\n'
+def NewFile(path, points, faces):
 
-    for face in faces:
-        txt += 'f'
-        for point_index in face:
-            txt += ' '+str(point_index+1)
-        txt += '\n'
+    text1 = '\nv '.join(' '.join('%0.3f' %x for x in y) for y in points)
+    text1 = 'v '+ text1
 
-    while True:
-        try:
-            with open(file_name, 'x') as f:
-                f.write(txt)
-                break
-        except:
-                print('stuck in here')
-                index_open = file_name.find('(')
-                index_close = file_name.find(')')
-                
-                if index_open != -1:
-                    new_int = str( int(file_name[index_open+1:index_close])+1 )
-                    file_name = file_name[:index_open+1] + new_int + file_name[index_close:]
-                else:
-                    file_name = file_name[:file_name.find('.')] + ' (1)' + '.obj'
+    faces += 1
+    text2 = '\nf '.join(' '.join('%i' %x for x in y) for y in faces)
+    text2 = 'f ' +text2
+    txt = text1 +'\n'+ text2
 
-#Make a 3d moldel of thing with each pix being its approx size
-def MakeObj(verts):
-    while True:
-     
-        window_name = 'File Name'
-        file_name = menu_functions.TypeMenu(window_name,"Please Type Destination File","Press Enter When Done")
-        onlyfiles = [f for f in os.listdir('Outputs') if os.path.isfile(os.path.join('Outputs'+file_name, f))]
-        print(onlyfiles)
-        if file_name not in onlyfiles:
-            cv2.destroyWindow(window_name)
-            break
-        else:
-            img = cv2.imread('Images/blank.png')
-            cv2.putText(img, "Filde Already Exists", (10, 20), cv2.FONT_HERSHEY_SIMPLEX , .5, (0, 0, 0), 1, cv2.LINE_AA) 
-            cv2.putText(img, "Press Any Key To Try Again", (10, 40), cv2.FONT_HERSHEY_SIMPLEX , .5, (0, 0, 0), 1, cv2.LINE_AA) 
-            cv2.imshow(window_name, img)
-    points = []
-    faces = []
+    with open(path, 'x') as f:
+        f.write(txt)
+
+def FindColorMath(color_image):
+    color_image  = color_image.reshape(color_image.size//3, 3)
+    tire_colors  = color_image[settings.tire_pos]
+    floor_colors = color_image[np.logical_not(settings.tire_pos)]
+
+    tire_colors = np.transpose(tire_colors)
+    lil = np.amin(tire_colors,1)+1
+    big = np.amax(tire_colors,1)-1
+    print('Above',lil,'Below',big)
     
-    for i in range(len(verts)):
-        points.append( verts[i] )
-        if verts[i][2] == 0:
-            continue
-        try:
-            if verts[i+1][2] != 0 and verts[i+settings.w][2] != 0 and verts[i+settings.w+1][2] != 0:
-                face1 = [ i ]
-                face1.append( i + settings.w  + 1 )
-                
-                face2 = face1.copy()
-                face1.append( i + settings.w )
+    truth1 = floor_colors > lil
+    truth2 = floor_colors < big
+    truth = sum(np.transpose(truth1*truth2)) == 3
+    if np.any(truth):
+        floor_as_tires = np.count_nonzero(truth)
+        total_floor = len(truth)
+        print('Oh NO',floor_as_tires,'/',total_floor,floor_as_tires/total_floor,'floor pixels count as tires')
+    else:
+        settings.color_compare = [lil, big]
 
-                face2.append( i + 1 )
-            
-                faces.append(face1)
-                faces.append(face2)
-        except:
-            pass
-                
-    NewFile(file_name,points,faces)
+def MakeObjOld(all_verts, shape, path, file_name):
+    #for i in range(len(all_verts)):
+        i=0
+        startTime = timeit.default_timer()
+        print('Exporting Frame',str(i))
+        verts = all_verts[i]
+
+        h, w = shape
+        #Assuming the pix are square
+        #when allowing to be rectangel the width was too large
+        fovy = settings.depth_intrinsics.ppy*90/math.pi
+
+        consty = 2*math.tan(fovy)/h
+        points = []
+        faces = []
+
+        j = 0
+        for vert in verts:
+            if vert[2] == 0 or vert[2] > 2:
+                continue
+            py = consty*vert[2]
+             
+            p2 = vert.copy()
+            p3 = vert.copy()
+            p4 = vert.copy()
+
+            p2[0] += py
+            p3[1] += py
+            p4[0] += py
+            p4[1] += py
+
+    
+            points.extend([vert.copy(),p2,p3,p4])
+
+            faces.append([j, j+1, j+2])
+            faces.append([j+1, j+2, j+3])
+            j+=4
+        MathTime = timeit.default_timer()
+        obj_path = path+file_name+str(i+1)+'.obj'
+        NewFile(obj_path,points,np.array(faces))
+        FileTime = timeit.default_timer()
+        print('Math', MathTime-startTime, FileTime-startTime)
+
+
+def MakeObj(verts, shape, path, file_name, frame):
+   
+    startTime = timeit.default_timer()
+    if frame%settings.cores == 0: print('Exporting Frames', frame,':',str(frame+settings.cores))
+    
+
+    #deleting all the [0,0,0]
+    truth = np.array(np.sign(sum(np.transpose(verts != [0,0,0]))-1)+1, dtype=bool)
+    verts = verts[truth]
+
+    #deleting anything with a z>2
+    truth = np.array(sum(np.transpose(verts <= [-np.inf,-np.inf,2])), dtype=bool)
+    verts = verts[truth]
+
+
+    h, w = shape
+    #consty multiplied by depth gives he height and since square width of the pix
+    fovy = settings.depth_intrinsics.ppy*90/math.pi
+    consty = 2*math.tan(fovy)/h
+    
+    arr_1d_0_0_py = (verts*np.full_like(verts, [0,0,consty])).reshape(len(verts)*3)
+    arr_1d_0_py_0 = np.append(np.delete(arr_1d_0_0_py, 0), 0)
+    add_py_to_y = arr_1d_0_py_0.reshape(len(verts),3)
+
+    arr_1d_py_0_0 = np.append(np.delete(arr_1d_0_py_0, 0), 0)
+    add_py_to_x = arr_1d_py_0_0.reshape(len(verts),3)
+
+    points1 = verts.copy()
+    points2 = verts + add_py_to_x
+    points3 = verts + add_py_to_y
+    points4 = points3 + add_py_to_x
+
+    points = np.concatenate((points1,points2,points3,points4))
+
+    #the way points are set up face must 0,v,2v,3v and then 1,v+1,2v+1,3v+1 and so on till v-1, 2v-1, 3v-1, 4v-1
+    #for triangles it should be 0,v,2v and v,2v,3v
+    face1 = np.arange(3)*len(verts)
+    faces1 = np.full((len(verts),3), face1) + np.arange(len(verts)).reshape(len(verts),1)
+
+    face2 =  np.arange(1,4)*len(verts)
+    faces2 = np.full((len(verts),3), face2) + np.arange(len(verts)).reshape(len(verts),1)
+
+    faces = np.concatenate((faces1,faces2))
+
+    MathTime = timeit.default_timer()
+    obj_path = path+file_name+str(frame+1)+'.stl'
+    #NewFile(obj_path,points,faces)
+    # Create the mesh
+    cube = mesh.Mesh(np.zeros(faces.shape[0], dtype=mesh.Mesh.dtype))
+    for i, f in enumerate(faces):
+        for j in range(3):
+            cube.vectors[i][j] = points[f[j],:]
+
+    # Write the mesh to file
+    cube.save(obj_path)
+    FileTime = timeit.default_timer()
+    if frame%settings.cores == 0: print("Done", MathTime-startTime, FileTime-MathTime)

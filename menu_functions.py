@@ -1,4 +1,78 @@
 import cv2
+import os
+import settings
+
+def MakeFolder():
+    first = True
+    while True:
+
+        #if folder doesnt exist make it and return the path
+        window_name = 'Folder'
+        if first:
+            msg1 = "Please Type Destination Folder"
+            msg2 = "Hit Enter When Finished"
+        else:
+            msg1 = "That Folder Already Exist"
+            msg2 = "Press Any Key To Try Again"
+        folder_name = TypeMenu(window_name,msg1,msg2)
+        first = False
+        print(folder_name)
+        try:
+            os.makedirs('Outputs/'+folder_name)
+            path = 'Outputs/'+folder_name+'/'
+            cv2.destroyWindow(window_name)
+            return path
+        #if folder exists inform user and try again
+        except:
+            pass
+
+def GetFile():
+    #get list of folders in outputs, put most recent at top
+    allfolders = [f for f in os.listdir('Outputs') if not os.path.isfile(os.path.join('Outputs', f))]
+    folder_dict = {}
+    for i in allfolders:
+        folder_dict[i] = os.path.getmtime(os.path.join('Outputs', i))
+    res = {key: val for key, val in sorted(folder_dict.items(), reverse=True, key = lambda ele: ele[1])}
+    allfolders = list(res.keys())
+
+    while True:
+        #Get what folder user clicked on, if they backspaced at folder level return false
+        i = ClickMenu(settings.window_name, 'Select Folder', allfolders, False)
+        if i == 0:
+            return False
+        else:
+            folder = allfolders[i-1]  
+
+        
+        #Get what file they clicked on, if back space cont in loop, else get file and return path
+        #allfiles = [f for f in os.listdir('Outputs/'+folder) if os.path.isfile(os.path.join('Outputs/'+folder, f))]
+        allfiles = os.listdir('Outputs/'+folder)
+        i = ClickMenu(settings.window_name, folder+': Please Select File', allfiles, False)
+        if i !=0 :
+            file = allfiles[i-1]
+            path = 'Outputs/'+folder+'/'+file
+            cv2.destroyAllWindows()
+            return path
+
+def GetFolder():
+    #get list of folders in outputs, put most recent at top
+    allfolders = [f for f in os.listdir('Outputs') if not os.path.isfile(os.path.join('Outputs', f))]
+    folder_dict = {}
+    for i in allfolders:
+        folder_dict[i] = os.path.getmtime(os.path.join('Outputs', i))
+    res = {key: val for key, val in sorted(folder_dict.items(), reverse=True, key = lambda ele: ele[1])}
+    allfolders = list(res.keys())
+
+
+    #Get what folder user clicked on, if they backspaced at folder level return false
+    i = ClickMenu(settings.window_name, 'Select Folder', allfolders, False)
+    if i == 0:
+        return False
+    else:
+        folder = allfolders[i-1]  
+        path = 'Outputs/'+folder+'/'
+        cv2.destroyAllWindows()
+        return path
 
 def ClickMenu(window_name, title, options, center):
     #Initializing
@@ -37,7 +111,7 @@ def ClickMenu(window_name, title, options, center):
     def Select():
         #If mouse is on a clickable spot, Call that function and destroy menu window
         if option_i[0] < len(options) and option_i[0] >= 0:
-            cv2.destroyWindow(window_name)
+            #cv2.destroyWindow(window_name)
             final[0] = option_i[0]+1
 
     #on mouse anything
@@ -94,11 +168,10 @@ def ClickMenu(window_name, title, options, center):
         if key == 13: Select()
         #If esc q or backspace, end program
         if key in (27, ord("q"), 8):
-            cv2.destroyWindow(window_name)
+            #cv2.destroyWindow(window_name)
             return False
         if final[0] != 'NOTHING':
             return final[0]
-
 
 def TypeMenu(window_name, msg1, msg2):
     #Initilizing
